@@ -238,7 +238,7 @@ def eval_genomes(genomes, config):
     if HEADLESS_MODE:
         SHOW_GRAPHICS = False
     else:
-        SHOW_GRAPHICS = (gen % 10 == 0) or (gen > 45)
+        SHOW_GRAPHICS = (gen % 10 == 0) or (gen > 20)
 
     # ### NEAT: Listas para manter o controle de cada pássaro, sua rede neural e seu genoma
     nets = []
@@ -253,12 +253,12 @@ def eval_genomes(genomes, config):
         ge.append(g)
 
     floor = Floor(FLOOR_Y)
-    pipes = [Pipe(450)]
+    pipes = [Pipe(700)]  # Cano mais longe para dar tempo
     score = 0
     
     # Contador de frames para limitar tempo máximo por geração
     frame_count = 0
-    max_frames = 8000  # Aumentar ainda mais para permitir múltiplos canos
+    max_frames = 2000  # Mais tempo
     
     running = True
     while running and len(birds) > 0 and frame_count < max_frames:
@@ -278,66 +278,101 @@ def eval_genomes(genomes, config):
 
         for x, bird in enumerate(birds):
             bird.move()
-            # ### NEAT: Fitness mais generoso por tempo vivo
-            ge[x].fitness += 0.2
             
-            # Recompensa GRANDE por progresso horizontal
-            distance_traveled = frame_count * 0.1  # Aproximação do progresso
-            ge[x].fitness += distance_traveled * 0.01
-
-            # ### NEAT: Inputs melhorados para a rede neural
-            bird_y_normalized = (bird.y - HEIGHT/2) / (HEIGHT/2)  # -1 a 1
-            pipe_distance = pipes[pipe_ind].x - bird.x
-            pipe_distance_normalized = pipe_distance / WIDTH  # 0 a 1
+            # Fitness generoso por estar vivo
+            ge[x].fitness += 0.1
             
-            # Distância ao centro do gap do cano
+            # Recompensa por se aproximar horizontalmente do cano
+            distance_to_pipe = pipes[pipe_ind].x - bird.x
+            if distance_to_pipe > 0:  # Ainda não passou
+                ge[x].fitness += max(0, (500 - distance_to_pipe) / 100)
+            
+            # Recompensa por estar na altura certa do gap
             gap_center = pipes[pipe_ind].height + pipes[pipe_ind].GAP/2
-            gap_distance_normalized = (bird.y - gap_center) / (HEIGHT/2)  # -1 a 1
-            
-            output = nets[x].activate((bird_y_normalized, pipe_distance_normalized, gap_distance_normalized))
+            vertical_distance_to_center = abs(bird.y - gap_center)
+            if vertical_distance_to_center < 100:  # Próximo do centro
+                ge[x].fitness += (100 - vertical_distance_to_center) / 20
 
-            # ### NEAT: Se a saída da rede for maior que 0.5, o pássaro pula.
-            if output[0] > 0.5:
+            # ### NEAT: Input SUPER simplificado ###
+            # Input 1: Quão acima ou abaixo do centro do gap o pássaro está
+            gap_center = pipes[pipe_ind].height + pipes[pipe_ind].GAP/2
+            vertical_diff = (bird.y - gap_center) / 100  # -3 a +3 aproximadamente
+            
+            # Input 2: Distância até o cano (normalizada)
+            horizontal_dist = max(0, pipes[pipe_ind].x - bird.x) / 400  # 0 a 1
+            
+            # Input 3: Velocidade (se está subindo ou descendo)
+            velocity = bird.vel / 10  # -2 a +2 aproximadamente
+            
+            output = nets[x].activate((vertical_diff, horizontal_dist, velocity))
+
+            # Limiar mais baixo para pular
+            if output[0] > 0.3:  # Mudado de 0.5 para 0.3
                 bird.jump()
 
         # Movimentação dos canos e checagem de colisões
         rem = []
         add_pipe = False
+        
         for pipe in pipes:
+            # Primeiro move o cano
+            pipe.move()
+            
+            # Lista para remoção segura de pássaros
+            birds_to_remove = []
+            
             for x, bird in enumerate(birds):
-                if pipe.collide(bird):
-                    # ### NEAT: Penalidade pequena por colisão 
-                    ge[x].fitness -= 2
-                    birds.pop(x)
-                    nets.pop(x)
-                    ge.pop(x)
-
-                if not pipe.passed and pipe.x < bird.x:
+                # Verificar se passou pelo cano - MAIS GENEROSO
+                if not pipe.passed and bird.x >= pipe.x + pipe.PIPE_TOP.get_width() - 10:  # 10px antes
                     pipe.passed = True
                     add_pipe = True
+                    
+                    # RECOMPENSA GIGANTESCA por passar pelo cano
+                    ge[x].fitness += 5000  # Ainda maior!
+                    print(f"🎉🎉🎉 SUCESSO! Pássaro {x} passou pelo cano na geração {gen}! 🎉🎉🎉")
+                
+                # Colisão MUITO mais permissiva
+                bird_center_x = bird.x + 17  # Centro do pássaro
+                bird_center_y = bird.y + 12
+                
+                # Só verificar colisão se estiver realmente na área do cano
+                if (bird_center_x > pipe.x - 10 and bird_center_x < pipe.x + 60):
+                    # Área de colisão menor
+                    if (bird_center_y < pipe.height + 10 or bird_center_y > pipe.height + pipe.GAP - 10):
+                        birds_to_remove.append(x)
+                        print(f"💥 Pássaro {x} colidiu: bird_y={bird_center_y:.1f}, pipe_top={pipe.height:.1f}, pipe_bottom={pipe.height + pipe.GAP:.1f}")
 
-            if pipe.x + pipe.PIPE_TOP.get_width() < 0:
-                rem.append(pipe)
-            
-            pipe.move()
-
-        if add_pipe:
-            score += 1
-            # ### NEAT: Recompensa MASSIVA por passar por um cano
-            for g in ge:
-                g.fitness += 30  # Aumentado drasticamente!
-            pipes.append(Pipe(450))
-
-        for r in rem:
-            pipes.remove(r)
-
-        for x, bird in enumerate(birds):
-            # Checa se o pássaro bateu no chão ou no teto
-            if bird.y + bird.img.get_height() >= FLOOR_Y or bird.y < 0:
-                ge[x].fitness -= 2
+            # Remove pássaros que colidiram (de trás para frente)
+            for x in reversed(birds_to_remove):
                 birds.pop(x)
                 nets.pop(x)
                 ge.pop(x)
+
+            # Remove canos que saíram da tela
+            if pipe.x + pipe.PIPE_TOP.get_width() < 0:
+                rem.append(pipe)
+
+        # Adiciona novo cano quando algum pássaro passou
+        if add_pipe:
+            score += 1
+            pipes.append(Pipe(700))  # Próximo cano mais longe
+            print(f"🏆 SCORE AUMENTOU! Score atual: {score}")
+
+        # Remove canos antigos
+        for r in rem:
+            pipes.remove(r)
+
+        # Verifica colisão com chão/teto - mais permissivo
+        birds_to_remove = []
+        for x, bird in enumerate(birds):
+            if bird.y + 30 >= FLOOR_Y or bird.y < -5:  # Mais margem
+                birds_to_remove.append(x)
+        
+        # Remove pássaros que bateram no chão/teto
+        for x in reversed(birds_to_remove):
+            birds.pop(x)
+            nets.pop(x)
+            ge.pop(x)
         
         floor.move()
         
@@ -348,7 +383,13 @@ def eval_genomes(genomes, config):
     # Imprimir estatísticas da geração
     if len(ge) > 0:
         max_fitness = max(g.fitness for g in ge)
-        print(f"Geração {gen}: Melhor fitness = {max_fitness:.2f}, Score máximo estimado = {score}")
+        avg_fitness = sum(g.fitness for g in ge) / len(ge)
+        if score > 0:
+            print(f"🏆🏆🏆 Geração {gen}: SUCESSO! Score = {score}, Melhor fitness = {max_fitness:.2f} 🏆🏆🏆")
+        else:
+            print(f"Geração {gen}: Melhor fitness = {max_fitness:.2f}, Fitness médio = {avg_fitness:.2f}, Score = {score}")
+    else:
+        print(f"Geração {gen}: Todos os pássaros morreram, Score = {score}")
 
 
 # ### NEAT: Função para rodar o NEAT
@@ -365,8 +406,8 @@ def run(config_path):
     stats = neat.StatisticsReporter()
     p.add_reporter(stats)
 
-    # ### NEAT: Roda a simulação por até 200 gerações
-    winner = p.run(eval_genomes, 200)
+    # ### NEAT: Roda a simulação até encontrar solução ou atingir limite
+    winner = p.run(eval_genomes, 1000)
     
     # Mostra as estatísticas do melhor genoma encontrado
     print('\nMelhor genoma:\n{!s}'.format(winner))

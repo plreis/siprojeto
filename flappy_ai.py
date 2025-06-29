@@ -258,7 +258,7 @@ def eval_genomes(genomes, config):
     
     # Contador de frames para limitar tempo máximo por geração
     frame_count = 0
-    max_frames = 3000  # Limite máximo de frames por geração
+    max_frames = 8000  # Aumentar ainda mais para permitir múltiplos canos
     
     running = True
     while running and len(birds) > 0 and frame_count < max_frames:
@@ -278,18 +278,14 @@ def eval_genomes(genomes, config):
 
         for x, bird in enumerate(birds):
             bird.move()
-            # ### NEAT: Fitness mais generoso - recompensa por se manter vivo
-            ge[x].fitness += 0.1
+            # ### NEAT: Fitness mais generoso por tempo vivo
+            ge[x].fitness += 0.2
             
-            # Recompensa extra por se aproximar do centro do GAP
-            pipe_center = pipes[pipe_ind].height + pipes[pipe_ind].GAP/2
-            distance_to_center = abs(bird.y - pipe_center)
-            # Recompensa inversamente proporcional à distância do centro
-            if distance_to_center < pipes[pipe_ind].GAP:
-                ge[x].fitness += (pipes[pipe_ind].GAP - distance_to_center) / pipes[pipe_ind].GAP * 0.5
+            # Recompensa GRANDE por progresso horizontal
+            distance_traveled = frame_count * 0.1  # Aproximação do progresso
+            ge[x].fitness += distance_traveled * 0.01
 
             # ### NEAT: Inputs melhorados para a rede neural
-            # Normalizar os inputs para valores entre -1 e 1
             bird_y_normalized = (bird.y - HEIGHT/2) / (HEIGHT/2)  # -1 a 1
             pipe_distance = pipes[pipe_ind].x - bird.x
             pipe_distance_normalized = pipe_distance / WIDTH  # 0 a 1
@@ -310,8 +306,8 @@ def eval_genomes(genomes, config):
         for pipe in pipes:
             for x, bird in enumerate(birds):
                 if pipe.collide(bird):
-                    # ### NEAT: Penalidade menor por colisão 
-                    ge[x].fitness -= 1
+                    # ### NEAT: Penalidade pequena por colisão 
+                    ge[x].fitness -= 2
                     birds.pop(x)
                     nets.pop(x)
                     ge.pop(x)
@@ -327,9 +323,9 @@ def eval_genomes(genomes, config):
 
         if add_pipe:
             score += 1
-            # ### NEAT: Recompensa MUITO grande por passar por um cano
+            # ### NEAT: Recompensa MASSIVA por passar por um cano
             for g in ge:
-                g.fitness += 15  # Aumentado significativamente
+                g.fitness += 30  # Aumentado drasticamente!
             pipes.append(Pipe(450))
 
         for r in rem:
@@ -338,6 +334,7 @@ def eval_genomes(genomes, config):
         for x, bird in enumerate(birds):
             # Checa se o pássaro bateu no chão ou no teto
             if bird.y + bird.img.get_height() >= FLOOR_Y or bird.y < 0:
+                ge[x].fitness -= 2
                 birds.pop(x)
                 nets.pop(x)
                 ge.pop(x)
@@ -347,6 +344,11 @@ def eval_genomes(genomes, config):
         # Desenhar apenas se não estiver em modo headless
         if not HEADLESS_MODE and SHOW_GRAPHICS and frame_count % 2 == 0:
             draw_window(screen, birds, pipes, floor, score, gen)
+
+    # Imprimir estatísticas da geração
+    if len(ge) > 0:
+        max_fitness = max(g.fitness for g in ge)
+        print(f"Geração {gen}: Melhor fitness = {max_fitness:.2f}, Score máximo estimado = {score}")
 
 
 # ### NEAT: Função para rodar o NEAT
@@ -363,8 +365,8 @@ def run(config_path):
     stats = neat.StatisticsReporter()
     p.add_reporter(stats)
 
-    # ### NEAT: Roda a simulação por até 50 gerações, chamando a função eval_genomes a cada geração
-    winner = p.run(eval_genomes, 1000)
+    # ### NEAT: Roda a simulação por até 200 gerações
+    winner = p.run(eval_genomes, 200)
     
     # Mostra as estatísticas do melhor genoma encontrado
     print('\nMelhor genoma:\n{!s}'.format(winner))

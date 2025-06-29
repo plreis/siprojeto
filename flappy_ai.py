@@ -7,6 +7,9 @@ import neat
 import pickle
 import visualize
 
+# ### CONFIGURAÇÃO: Defina como True para executar sem gráficos (máxima velocidade)
+HEADLESS_MODE = True  # Mude para False se quiser ver os gráficos
+
 # ### NEAT: Variável para contar as gerações
 gen = 0
 
@@ -16,20 +19,33 @@ FLOOR_Y = 550
 
 # --- Inicialização do Pygame ---
 pygame.init()
-screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Flappy Bird AI")
-clock = pygame.time.Clock()
+
+if not HEADLESS_MODE:
+    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    pygame.display.set_caption("Flappy Bird AI")
+else:
+    # Modo headless: definir um modo de display mínimo para permitir convert_alpha()
+    os.environ['SDL_VIDEODRIVER'] = 'dummy'
+    screen = pygame.display.set_mode((1, 1))
+
+# Flag para controlar se deve mostrar gráficos (apenas para as melhores gerações)
+SHOW_GRAPHICS = False
 
 # --- Carregando Imagens ---
-# Use os.path.join para funcionar em qualquer sistema operacional
 def load_image(file_name):
-    return pygame.image.load(os.path.join("assets", file_name)).convert_alpha()
+    img = pygame.image.load(os.path.join("assets", file_name))
+    return img.convert_alpha() if not HEADLESS_MODE else img.convert()
 
 try:
-    back_img = load_image("img_46.png")
+    if not HEADLESS_MODE:
+        back_img = load_image("img_46.png")
+        over_img = load_image("img_45.png")
+    else:
+        back_img = None
+        over_img = None
+    
     floor_img = load_image("img_50.png")
     pipe_img = load_image("greenpipe.png")
-    over_img = load_image("img_45.png")
     
     bird_down = load_image("img_47.png")
     bird_mid = load_image("img_48.png")
@@ -40,9 +56,9 @@ except pygame.error as e:
     print("Verifique se a pasta 'assets' existe e contém todas as imagens .png no mesmo diretório do script.")
     sys.exit()
 
-
-# --- Fontes ---
-score_font = pygame.font.Font("freesansbold.ttf", 27)
+# --- Fontes (apenas se não estiver em modo headless) ---
+if not HEADLESS_MODE:
+    score_font = pygame.font.Font("freesansbold.ttf", 27)
 
 class Bird:
     IMGS = BIRDS_IMGS
@@ -53,7 +69,7 @@ class Bird:
     def __init__(self, x, y):
         self.x = x
         self.y = y
-        self.gravity = 0.17# Ajustado para um valor mais natural
+        self.gravity = 0.17
         self.tilt = 0
         self.tick_count = 0
         self.vel = 0
@@ -62,16 +78,14 @@ class Bird:
         self.img = self.IMGS[0]
 
     def jump(self):
-        self.vel = -10.5 # Pulo um pouco mais forte
+        self.vel = -10.5
         self.tick_count = 0
         self.height = self.y
 
     def move(self):
         self.tick_count += 1
-        # Física do movimento: d = v*t + 0.5*a*t^2
         displacement = self.vel * self.tick_count + 0.5 * self.gravity * self.tick_count ** 2
         
-        # Velocidade terminal
         if displacement >= 16:
             displacement = 16
 
@@ -80,7 +94,7 @@ class Bird:
 
         self.y = self.y + displacement
 
-        # Rotação do pássaro
+        # Rotação simplificada (apenas para colisão)
         if displacement < 0 or self.y < self.height + 50:
             if self.tilt < self.MAX_ROTATION:
                 self.tilt = self.MAX_ROTATION
@@ -89,6 +103,8 @@ class Bird:
                 self.tilt -= self.ROT_VEL
     
     def draw(self, win):
+        if HEADLESS_MODE or not SHOW_GRAPHICS:
+            return
         self.img_count += 1
         
         # Animação de bater de asas
@@ -117,7 +133,7 @@ class Bird:
         return pygame.mask.from_surface(self.img)
 
 class Pipe:
-    GAP = 200 # Espaço entre os canos
+    GAP = 200
     VEL = 5
 
     def __init__(self, x):
@@ -139,6 +155,8 @@ class Pipe:
         self.x -= self.VEL
 
     def draw(self, win):
+        if HEADLESS_MODE or not SHOW_GRAPHICS:
+            return
         win.blit(self.PIPE_TOP, (self.x, self.top))
         win.blit(self.PIPE_BOTTOM, (self.x, self.bottom))
         
@@ -176,11 +194,16 @@ class Floor:
             self.x2 = self.x1 + self.WIDTH
 
     def draw(self, win):
+        if HEADLESS_MODE or not SHOW_GRAPHICS:
+            return
         win.blit(self.IMG, (self.x1, self.y))
         win.blit(self.IMG, (self.x2, self.y))
 
 
 def draw_window(win, birds, pipes, floor, score, gen):
+    if HEADLESS_MODE or not SHOW_GRAPHICS:
+        return
+    
     win.blit(back_img, (0,0))
     
     for pipe in pipes:
@@ -208,8 +231,14 @@ def draw_window(win, birds, pipes, floor, score, gen):
 
 # ### NEAT: Esta é a função principal que o NEAT vai chamar para cada geração
 def eval_genomes(genomes, config):
-    global gen
+    global gen, SHOW_GRAPHICS
     gen += 1
+    
+    # Em modo headless, nunca mostrar gráficos
+    if HEADLESS_MODE:
+        SHOW_GRAPHICS = False
+    else:
+        SHOW_GRAPHICS = (gen % 10 == 0) or (gen > 45)
 
     # ### NEAT: Listas para manter o controle de cada pássaro, sua rede neural e seu genoma
     nets = []
@@ -227,24 +256,29 @@ def eval_genomes(genomes, config):
     pipes = [Pipe(450)]
     score = 0
     
+    # Contador de frames para limitar tempo máximo por geração
+    frame_count = 0
+    max_frames = 3000  # Limite máximo de frames por geração
+    
     running = True
-    while running and len(birds) > 0:
-        clock.tick(120) # Aumentar o tick para o AI treinar mais rápido
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-                pygame.quit()
-                sys.exit()
+    while running and len(birds) > 0 and frame_count < max_frames:
+        # Processar eventos apenas se não estiver em modo headless
+        if not HEADLESS_MODE and SHOW_GRAPHICS:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+                    pygame.quit()
+                    sys.exit()
 
+        frame_count += 1
         pipe_ind = 0
         if len(birds) > 0:
-            # Determina se usamos o primeiro ou o segundo cano na tela para a decisão da IA
             if len(pipes) > 1 and birds[0].x > pipes[0].x + pipes[0].PIPE_TOP.get_width():
                 pipe_ind = 1
 
         for x, bird in enumerate(birds):
             bird.move()
-            # ### NEAT: Recompensa o pássaro por se manter vivo
+            # ### NEAT: Recompensa menor por se manter vivo para acelerar a seleção
             ge[x].fitness += 0.1
 
             # ### NEAT: Ativa a rede neural do pássaro
@@ -261,7 +295,7 @@ def eval_genomes(genomes, config):
         for pipe in pipes:
             for x, bird in enumerate(birds):
                 if pipe.collide(bird):
-                    # ### NEAT: Se um pássaro colide, sua fitness é penalizada
+                    # ### NEAT: Penalidade maior por colisão para acelerar a eliminação
                     ge[x].fitness -= 1
                     birds.pop(x)
                     nets.pop(x)
@@ -294,7 +328,10 @@ def eval_genomes(genomes, config):
                 ge.pop(x)
         
         floor.move()
-        draw_window(screen, birds, pipes, floor, score, gen)
+        
+        # Desenhar apenas se não estiver em modo headless
+        if not HEADLESS_MODE and SHOW_GRAPHICS and frame_count % 2 == 0:
+            draw_window(screen, birds, pipes, floor, score, gen)
 
 
 # ### NEAT: Função para rodar o NEAT

@@ -1,0 +1,10 @@
+digraph {
+	node [fontsize=9 height=0.2 shape=circle width=0.2]
+	"Bird Y" [fillcolor=lightgray shape=box style=filled]
+	"Dist Top Pipe" [fillcolor=lightgray shape=box style=filled]
+	"Dist Bottom Pipe" [fillcolor=lightgray shape=box style=filled]
+	Jump [fillcolor=lightblue style=filled]
+	"Bird Y" -> Jump [color=red penwidth=0.12439037160607785 style=solid]
+	"Dist Top Pipe" -> Jump [color=green penwidth=0.379282143163562 style=solid]
+	"Dist Bottom Pipe" -> Jump [color=red penwidth=0.34709739252467164 style=solid]
+}

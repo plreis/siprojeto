@@ -278,12 +278,27 @@ def eval_genomes(genomes, config):
 
         for x, bird in enumerate(birds):
             bird.move()
-            # ### NEAT: Recompensa menor por se manter vivo para acelerar a seleção
+            # ### NEAT: Fitness mais generoso - recompensa por se manter vivo
             ge[x].fitness += 0.1
+            
+            # Recompensa extra por se aproximar do centro do GAP
+            pipe_center = pipes[pipe_ind].height + pipes[pipe_ind].GAP/2
+            distance_to_center = abs(bird.y - pipe_center)
+            # Recompensa inversamente proporcional à distância do centro
+            if distance_to_center < pipes[pipe_ind].GAP:
+                ge[x].fitness += (pipes[pipe_ind].GAP - distance_to_center) / pipes[pipe_ind].GAP * 0.5
 
-            # ### NEAT: Ativa a rede neural do pássaro
-            # Os inputs são: a posição Y do pássaro, a distância até o topo do cano e a distância até a base do cano.
-            output = nets[x].activate((bird.y, abs(bird.y - pipes[pipe_ind].height), abs(bird.y - pipes[pipe_ind].bottom)))
+            # ### NEAT: Inputs melhorados para a rede neural
+            # Normalizar os inputs para valores entre -1 e 1
+            bird_y_normalized = (bird.y - HEIGHT/2) / (HEIGHT/2)  # -1 a 1
+            pipe_distance = pipes[pipe_ind].x - bird.x
+            pipe_distance_normalized = pipe_distance / WIDTH  # 0 a 1
+            
+            # Distância ao centro do gap do cano
+            gap_center = pipes[pipe_ind].height + pipes[pipe_ind].GAP/2
+            gap_distance_normalized = (bird.y - gap_center) / (HEIGHT/2)  # -1 a 1
+            
+            output = nets[x].activate((bird_y_normalized, pipe_distance_normalized, gap_distance_normalized))
 
             # ### NEAT: Se a saída da rede for maior que 0.5, o pássaro pula.
             if output[0] > 0.5:
@@ -295,7 +310,7 @@ def eval_genomes(genomes, config):
         for pipe in pipes:
             for x, bird in enumerate(birds):
                 if pipe.collide(bird):
-                    # ### NEAT: Penalidade maior por colisão para acelerar a eliminação
+                    # ### NEAT: Penalidade menor por colisão 
                     ge[x].fitness -= 1
                     birds.pop(x)
                     nets.pop(x)
@@ -312,9 +327,9 @@ def eval_genomes(genomes, config):
 
         if add_pipe:
             score += 1
-            # ### NEAT: Recompensa grande por passar por um cano
+            # ### NEAT: Recompensa MUITO grande por passar por um cano
             for g in ge:
-                g.fitness += 5
+                g.fitness += 15  # Aumentado significativamente
             pipes.append(Pipe(450))
 
         for r in rem:
